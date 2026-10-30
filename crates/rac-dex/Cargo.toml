@@ -1,0 +1,12 @@
+[package]
+name = "rac-dex"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+adler2 = "2.0"
+sha1 = "0.10"
+byteorder = "1.5"
+thiserror = "1.0"
+

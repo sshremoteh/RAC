@@ -1,0 +1,15 @@
+[workspace]
+members = [
+    "crates/rac-zip",
+    "crates/rac-axml",
+    "crates/rac-signer",
+    "crates/rac-dex",
+    "crates/rac-cli",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["RAC Team"]
+license = "MIT OR Apache-2.0"

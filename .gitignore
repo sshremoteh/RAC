@@ -1,0 +1,6 @@
+/target
+**/*.rs.bk
+*.apk
+*.jks
+*.keystore
+.DS_Store
