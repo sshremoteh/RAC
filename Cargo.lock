@@ -555,6 +555,7 @@ dependencies = [
 name = "rac-signer"
 version = "0.1.0"
 dependencies = [
+ "base64ct",
  "p256",
  "rac-axml",
  "rac-zip",
@@ -564,6 +565,7 @@ dependencies = [
  "signature",
  "tempfile",
  "thiserror",
+ "yasna",
 ]
 
 [[package]]

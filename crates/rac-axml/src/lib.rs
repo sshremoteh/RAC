@@ -25,6 +25,7 @@ const RES_XML_END_ELEMENT_TYPE: u16 = 0x0103;
 // Typed value types
 const TYPE_STRING: u8 = 0x03;
 const TYPE_INT_DEC: u8 = 0x10;
+const TYPE_INT_HEX: u8 = 0x11;
 const TYPE_INT_BOOLEAN: u8 = 0x12;
 
 // Android resource IDs for common manifest attributes
@@ -42,6 +43,7 @@ fn get_android_attr_res_id(attr_name: &str) -> Option<u32> {
         "finishOnTaskLaunch" => Some(0x01010014),
         "clearTaskOnLaunch" => Some(0x01010015),
         "stateNotNeeded" => Some(0x01010016),
+        "screenOrientation" => Some(0x0101001e),
         "configChanges" => Some(0x0101001f),
         "minSdkVersion" => Some(0x0101020c),
         "maxSdkVersion" => Some(0x01010271),
@@ -50,7 +52,10 @@ fn get_android_attr_res_id(attr_name: &str) -> Option<u32> {
         "versionName" => Some(0x0101021c),
         "hasCode" => Some(0x01010265),
         "allowBackup" => Some(0x01010280),
+        "required" => Some(0x0101028e),
         "hardwareAccelerated" => Some(0x010102d3),
+        "extractNativeLibs" => Some(0x010104ea),
+        "version" => Some(0x01010519),
         _ => None,
     }
 }
@@ -326,11 +331,17 @@ pub fn compile_xml_to_axml(xml_str: &str) -> Result<Vec<u8>, AxmlError> {
                     let a_name_idx = pool.get_or_insert(&attr.name);
                     let a_val_idx = pool.get_or_insert(&attr.value);
 
-                    // Parse value into typed value (integer, boolean, or string)
+                    // Parse value into typed value (hex integer, decimal integer, boolean, or string)
                     let (data_type, data_val) = if attr.value == "true" {
                         (TYPE_INT_BOOLEAN, 0xFFFFFFFF)
                     } else if attr.value == "false" {
                         (TYPE_INT_BOOLEAN, 0)
+                    } else if let Some(hex_str) = attr.value.strip_prefix("0x").or_else(|| attr.value.strip_prefix("0X")) {
+                        if let Ok(hex_val) = u32::from_str_radix(hex_str, 16) {
+                            (TYPE_INT_HEX, hex_val)
+                        } else {
+                            (TYPE_STRING, a_val_idx)
+                        }
                     } else if let Ok(int_val) = attr.value.parse::<u32>() {
                         (TYPE_INT_DEC, int_val)
                     } else {

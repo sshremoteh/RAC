@@ -1,8 +1,10 @@
-use p256::ecdsa::{signature::Signer, SigningKey, Signature};
-use rcgen::{CertificateParams, KeyPair, DistinguishedName, DnType};
+use base64ct::{Base64, Encoding};
+use p256::ecdsa::{signature::Signer, Signature, SigningKey};
+use rcgen::{CertificateParams, DistinguishedName, DnType, KeyPair};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 use rac_zip::find_zip_sections;
+use yasna::models::ObjectIdentifier;
 
 #[derive(Error, Debug)]
 pub enum SignerError {
@@ -76,6 +78,142 @@ pub fn compute_apk_digest_sha256(
 fn write_len_prefixed(buf: &mut Vec<u8>, data: &[u8]) {
     buf.extend_from_slice(&(data.len() as u32).to_le_bytes());
     buf.extend_from_slice(data);
+}
+
+/// Extracts (Issuer DER, SerialNumber bytes) from an X.509 Certificate DER.
+fn parse_cert_issuer_and_serial(cert_der: &[u8]) -> Result<(Vec<u8>, Vec<u8>), SignerError> {
+    yasna::parse_der(cert_der, |reader| {
+        reader.read_sequence(|cert| {
+            let (issuer, serial) = cert.next().read_sequence(|tbs| {
+                // 1. version [0] EXPLICIT
+                let _ = tbs.next().read_tagged_der()?;
+                // 2. serialNumber
+                let serial = tbs.next().read_der()?;
+                // 3. signature algorithm
+                let _ = tbs.next().read_der()?;
+                // 4. issuer
+                let issuer = tbs.next().read_der()?;
+                // 5. validity
+                let _ = tbs.next().read_der()?;
+                // 6. subject
+                let _ = tbs.next().read_der()?;
+                // 7. subjectPublicKeyInfo
+                let _ = tbs.next().read_der()?;
+                // 8. optional extensions [3] EXPLICIT
+                let _ = tbs.read_optional(|reader| reader.read_tagged_der());
+                Ok((issuer, serial))
+            })?;
+            // 2. signatureAlgorithm
+            let _ = cert.next().read_der()?;
+            // 3. signatureValue
+            let _ = cert.next().read_der()?;
+            Ok((issuer, serial))
+        })
+    }).map_err(|e| SignerError::Crypto(format!("Failed to parse certificate: {e}")))
+}
+
+/// Generates v1 JAR signature files (MANIFEST.MF, CERT.SF, CERT.EC) for inclusion in META-INF/.
+pub fn generate_v1_signature_files(
+    entries: &[(&str, &[u8])],
+    signing_key: &SigningKey,
+    cert_der: &[u8],
+) -> Result<Vec<(String, Vec<u8>)>, SignerError> {
+    // 1. MANIFEST.MF
+    let mut manifest = String::from("Manifest-Version: 1.0\r\nCreated-By: 1.0 (Android)\r\nBuilt-By: RAC\r\n\r\n");
+    let mut entry_digests: Vec<(&str, String)> = Vec::new();
+
+    for (name, data) in entries {
+        if name.starts_with("META-INF/") {
+            continue;
+        }
+        let digest = Base64::encode_string(&Sha256::digest(data));
+        manifest.push_str(&format!("Name: {}\r\nSHA-256-Digest: {}\r\n\r\n", name, digest));
+        entry_digests.push((name, digest));
+    }
+    let manifest_bytes = manifest.into_bytes();
+
+    // 2. CERT.SF
+    let manifest_digest = Base64::encode_string(&Sha256::digest(&manifest_bytes));
+    let mut cert_sf = format!("Signature-Version: 1.0\r\nCreated-By: 1.0 (Android)\r\nSHA-256-Digest-Manifest: {}\r\n\r\n", manifest_digest);
+
+    for (name, digest) in entry_digests {
+        cert_sf.push_str(&format!("Name: {}\r\nSHA-256-Digest: {}\r\n\r\n", name, digest));
+    }
+    let cert_sf_bytes = cert_sf.into_bytes();
+
+    // 3. CERT.EC (PKCS#7 SignedData of CERT.SF)
+    let sf_signature: Signature = signing_key.sign(&cert_sf_bytes);
+    let sf_der_sig = sf_signature.to_der();
+
+    let (issuer_der, serial_der) = parse_cert_issuer_and_serial(cert_der)?;
+
+    // PKCS#7 OIDs
+    let oid_pkcs7_signed_data = ObjectIdentifier::from_slice(&[1, 2, 840, 113549, 1, 7, 2]);
+    let oid_pkcs7_data = ObjectIdentifier::from_slice(&[1, 2, 840, 113549, 1, 7, 1]);
+    let oid_sha256 = ObjectIdentifier::from_slice(&[2, 16, 840, 1, 101, 3, 4, 2, 1]);
+    let oid_ecdsa_with_sha256 = ObjectIdentifier::from_slice(&[1, 2, 840, 10045, 4, 3, 2]);
+
+    let pkcs7_der = yasna::construct_der_seq(|writer| {
+        writer.next().write_oid(&oid_pkcs7_signed_data);
+        writer.next().write_tagged(yasna::Tag::context(0), |writer| {
+            writer.write_sequence(|writer| {
+                // version: 1
+                writer.next().write_u8(1);
+
+                // digestAlgorithms: SET OF { AlgorithmIdentifier }
+                writer.next().write_set(|writer| {
+                    writer.next().write_sequence(|writer| {
+                        writer.next().write_oid(&oid_sha256);
+                        writer.next().write_null();
+                    });
+                });
+
+                // contentInfo: ContentInfo { contentType: pkcs7-data }
+                writer.next().write_sequence(|writer| {
+                    writer.next().write_oid(&oid_pkcs7_data);
+                });
+
+                // certificates [0] IMPLICIT CertificateSet
+                writer.next().write_tagged(yasna::Tag::context(0), |writer| {
+                    writer.write_der(cert_der);
+                });
+
+                // signerInfos: SignerInfos
+                writer.next().write_set(|writer| {
+                    writer.next().write_sequence(|writer| {
+                        // version: 1
+                        writer.next().write_u8(1);
+
+                        // sid: IssuerAndSerialNumber
+                        writer.next().write_sequence(|writer| {
+                            writer.next().write_der(&issuer_der);
+                            writer.next().write_der(&serial_der);
+                        });
+
+                        // digestAlgorithm: sha256
+                        writer.next().write_sequence(|writer| {
+                            writer.next().write_oid(&oid_sha256);
+                            writer.next().write_null();
+                        });
+
+                        // digestEncryptionAlgorithm: ecdsa-with-sha256
+                        writer.next().write_sequence(|writer| {
+                            writer.next().write_oid(&oid_ecdsa_with_sha256);
+                        });
+
+                        // encryptedDigest: signature bytes
+                        writer.next().write_bytes(sf_der_sig.as_bytes());
+                    });
+                });
+            });
+        });
+    });
+
+    Ok(vec![
+        ("META-INF/MANIFEST.MF".to_string(), manifest_bytes),
+        ("META-INF/CERT.SF".to_string(), cert_sf_bytes),
+        ("META-INF/CERT.EC".to_string(), pkcs7_der),
+    ])
 }
 
 /// Signs an aligned APK buffer using APK Signature Scheme v2.
@@ -186,4 +324,20 @@ pub fn sign_apk_v2_with_key(
     final_apk.extend_from_slice(&final_eocd);
 
     Ok(final_apk)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_v1_and_v2_signing() {
+        let (signing_key, cert_der) = generate_self_signed_cert().unwrap();
+        let files = [("AndroidManifest.xml", b"hello".as_slice())];
+        let v1_files = generate_v1_signature_files(&files, &signing_key, &cert_der).unwrap();
+        assert_eq!(v1_files.len(), 3);
+        assert_eq!(v1_files[0].0, "META-INF/MANIFEST.MF");
+        assert_eq!(v1_files[1].0, "META-INF/CERT.SF");
+        assert_eq!(v1_files[2].0, "META-INF/CERT.EC");
+    }
 }
