@@ -28,6 +28,148 @@ const TYPE_INT_DEC: u8 = 0x10;
 const TYPE_INT_HEX: u8 = 0x11;
 const TYPE_INT_BOOLEAN: u8 = 0x12;
 
+fn parse_attr_value(attr_name: &str, val: &str, str_idx: u32) -> (u8, u32) {
+    if val == "true" {
+        return (TYPE_INT_BOOLEAN, 0xFFFFFFFF);
+    }
+    if val == "false" {
+        return (TYPE_INT_BOOLEAN, 0);
+    }
+
+    match attr_name {
+        "screenOrientation" => {
+            let code = match val {
+                "unspecified" => Some(0xFFFFFFFF),
+                "landscape" => Some(0),
+                "portrait" => Some(1),
+                "user" => Some(2),
+                "behind" => Some(3),
+                "sensor" => Some(4),
+                "nosensor" => Some(5),
+                "sensorLandscape" => Some(6),
+                "sensorPortrait" => Some(7),
+                "reverseLandscape" => Some(8),
+                "reversePortrait" => Some(9),
+                "fullSensor" => Some(10),
+                "userLandscape" => Some(11),
+                "userPortrait" => Some(12),
+                "fullUser" => Some(13),
+                "locked" => Some(14),
+                _ => None,
+            };
+            if let Some(c) = code {
+                return (TYPE_INT_DEC, c);
+            }
+        }
+        "configChanges" => {
+            let mut mask = 0u32;
+            let mut matched = false;
+            for part in val.split('|').map(|s| s.trim()) {
+                let bit = match part {
+                    "mcc" => Some(0x0001),
+                    "mnc" => Some(0x0002),
+                    "locale" => Some(0x0004),
+                    "touchscreen" => Some(0x0008),
+                    "keyboard" => Some(0x0010),
+                    "keyboardHidden" => Some(0x0020),
+                    "navigation" => Some(0x0040),
+                    "orientation" => Some(0x0080),
+                    "screenLayout" => Some(0x0100),
+                    "uiMode" => Some(0x0200),
+                    "screenSize" => Some(0x0400),
+                    "smallestScreenSize" => Some(0x0800),
+                    "density" => Some(0x1000),
+                    "layoutDirection" => Some(0x2000),
+                    "colorMode" => Some(0x4000),
+                    "fontScale" => Some(0x40000000),
+                    _ => None,
+                };
+                if let Some(b) = bit {
+                    mask |= b;
+                    matched = true;
+                }
+            }
+            if matched {
+                return (TYPE_INT_HEX, mask);
+            }
+        }
+        "installLocation" => {
+            let code = match val {
+                "auto" => Some(0),
+                "internalOnly" => Some(1),
+                "preferExternal" => Some(2),
+                _ => None,
+            };
+            if let Some(c) = code {
+                return (TYPE_INT_DEC, c);
+            }
+        }
+        "launchMode" => {
+            let code = match val {
+                "standard" => Some(0),
+                "singleTop" => Some(1),
+                "singleTask" => Some(2),
+                "singleInstance" => Some(3),
+                "singleInstancePerTask" => Some(4),
+                _ => None,
+            };
+            if let Some(c) = code {
+                return (TYPE_INT_DEC, c);
+            }
+        }
+        "reqTouchScreen" => {
+            let code = match val {
+                "undefined" => Some(0),
+                "notouch" => Some(1),
+                "stylus" => Some(2),
+                "finger" => Some(3),
+                _ => None,
+            };
+            if let Some(c) = code {
+                return (TYPE_INT_DEC, c);
+            }
+        }
+        "reqKeyboardType" => {
+            let code = match val {
+                "undefined" => Some(0),
+                "nokeys" => Some(1),
+                "qwerty" => Some(2),
+                "twelvekey" => Some(3),
+                _ => None,
+            };
+            if let Some(c) = code {
+                return (TYPE_INT_DEC, c);
+            }
+        }
+        "reqNavigation" => {
+            let code = match val {
+                "undefined" => Some(0),
+                "nonav" => Some(1),
+                "dpad" => Some(2),
+                "trackball" => Some(3),
+                "wheel" => Some(4),
+                _ => None,
+            };
+            if let Some(c) = code {
+                return (TYPE_INT_DEC, c);
+            }
+        }
+        _ => {}
+    }
+
+    if let Some(hex_str) = val.strip_prefix("0x").or_else(|| val.strip_prefix("0X")) {
+        if let Ok(hex_val) = u32::from_str_radix(hex_str, 16) {
+            return (TYPE_INT_HEX, hex_val);
+        }
+    }
+
+    if let Ok(int_val) = val.parse::<u32>() {
+        return (TYPE_INT_DEC, int_val);
+    }
+
+    (TYPE_STRING, str_idx)
+}
+
 // Android resource IDs for common manifest attributes
 fn get_android_attr_res_id(attr_name: &str) -> Option<u32> {
     match attr_name {
@@ -331,22 +473,8 @@ pub fn compile_xml_to_axml(xml_str: &str) -> Result<Vec<u8>, AxmlError> {
                     let a_name_idx = pool.get_or_insert(&attr.name);
                     let a_val_idx = pool.get_or_insert(&attr.value);
 
-                    // Parse value into typed value (hex integer, decimal integer, boolean, or string)
-                    let (data_type, data_val) = if attr.value == "true" {
-                        (TYPE_INT_BOOLEAN, 0xFFFFFFFF)
-                    } else if attr.value == "false" {
-                        (TYPE_INT_BOOLEAN, 0)
-                    } else if let Some(hex_str) = attr.value.strip_prefix("0x").or_else(|| attr.value.strip_prefix("0X")) {
-                        if let Ok(hex_val) = u32::from_str_radix(hex_str, 16) {
-                            (TYPE_INT_HEX, hex_val)
-                        } else {
-                            (TYPE_STRING, a_val_idx)
-                        }
-                    } else if let Ok(int_val) = attr.value.parse::<u32>() {
-                        (TYPE_INT_DEC, int_val)
-                    } else {
-                        (TYPE_STRING, a_val_idx)
-                    };
+                    // Parse value into typed value (hex integer, decimal integer, boolean, enum, flags, or string)
+                    let (data_type, data_val) = parse_attr_value(&attr.name, &attr.value, a_val_idx);
 
                     nodes_chunk.write_u32::<LittleEndian>(a_ns_idx)?;
                     nodes_chunk.write_u32::<LittleEndian>(a_name_idx)?;

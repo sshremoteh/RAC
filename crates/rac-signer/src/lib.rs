@@ -134,7 +134,7 @@ pub fn generate_v1_signature_files(
 
     // 2. CERT.SF
     let manifest_digest = Base64::encode_string(&Sha256::digest(&manifest_bytes));
-    let mut cert_sf = format!("Signature-Version: 1.0\r\nCreated-By: 1.0 (Android)\r\nSHA-256-Digest-Manifest: {}\r\n\r\n", manifest_digest);
+    let mut cert_sf = format!("Signature-Version: 1.0\r\nCreated-By: 1.0 (Android)\r\nX-Android-APK-Signed: 2\r\nSHA-256-Digest-Manifest: {}\r\n\r\n", manifest_digest);
 
     for (name, digest) in entry_digests {
         cert_sf.push_str(&format!("Name: {}\r\nSHA-256-Digest: {}\r\n\r\n", name, digest));
@@ -153,56 +153,58 @@ pub fn generate_v1_signature_files(
     let oid_sha256 = ObjectIdentifier::from_slice(&[2, 16, 840, 1, 101, 3, 4, 2, 1]);
     let oid_ecdsa_with_sha256 = ObjectIdentifier::from_slice(&[1, 2, 840, 10045, 4, 3, 2]);
 
-    let pkcs7_der = yasna::construct_der_seq(|writer| {
-        writer.next().write_oid(&oid_pkcs7_signed_data);
-        writer.next().write_tagged(yasna::Tag::context(0), |writer| {
-            writer.write_sequence(|writer| {
-                // version: 1
-                writer.next().write_u8(1);
+    let pkcs7_der = yasna::construct_der(|writer| {
+        writer.write_sequence(|writer| {
+            writer.next().write_oid(&oid_pkcs7_signed_data);
+            writer.next().write_tagged(yasna::Tag::context(0), |writer| {
+                writer.write_sequence(|writer| {
+                    // version: 1
+                    writer.next().write_u8(1);
 
-                // digestAlgorithms: SET OF { AlgorithmIdentifier }
-                writer.next().write_set(|writer| {
-                    writer.next().write_sequence(|writer| {
-                        writer.next().write_oid(&oid_sha256);
-                        writer.next().write_null();
-                    });
-                });
-
-                // contentInfo: ContentInfo { contentType: pkcs7-data }
-                writer.next().write_sequence(|writer| {
-                    writer.next().write_oid(&oid_pkcs7_data);
-                });
-
-                // certificates [0] IMPLICIT CertificateSet
-                writer.next().write_tagged(yasna::Tag::context(0), |writer| {
-                    writer.write_der(cert_der);
-                });
-
-                // signerInfos: SignerInfos
-                writer.next().write_set(|writer| {
-                    writer.next().write_sequence(|writer| {
-                        // version: 1
-                        writer.next().write_u8(1);
-
-                        // sid: IssuerAndSerialNumber
-                        writer.next().write_sequence(|writer| {
-                            writer.next().write_der(&issuer_der);
-                            writer.next().write_der(&serial_der);
-                        });
-
-                        // digestAlgorithm: sha256
+                    // digestAlgorithms: SET OF { AlgorithmIdentifier }
+                    writer.next().write_set(|writer| {
                         writer.next().write_sequence(|writer| {
                             writer.next().write_oid(&oid_sha256);
                             writer.next().write_null();
                         });
+                    });
 
-                        // digestEncryptionAlgorithm: ecdsa-with-sha256
+                    // contentInfo: ContentInfo { contentType: pkcs7-data }
+                    writer.next().write_sequence(|writer| {
+                        writer.next().write_oid(&oid_pkcs7_data);
+                    });
+
+                    // certificates [0] IMPLICIT CertificateSet
+                    writer.next().write_tagged(yasna::Tag::context(0), |writer| {
+                        writer.write_der(cert_der);
+                    });
+
+                    // signerInfos: SignerInfos
+                    writer.next().write_set(|writer| {
                         writer.next().write_sequence(|writer| {
-                            writer.next().write_oid(&oid_ecdsa_with_sha256);
-                        });
+                            // version: 1
+                            writer.next().write_u8(1);
 
-                        // encryptedDigest: signature bytes
-                        writer.next().write_bytes(sf_der_sig.as_bytes());
+                            // sid: IssuerAndSerialNumber
+                            writer.next().write_sequence(|writer| {
+                                writer.next().write_der(&issuer_der);
+                                writer.next().write_der(&serial_der);
+                            });
+
+                            // digestAlgorithm: sha256
+                            writer.next().write_sequence(|writer| {
+                                writer.next().write_oid(&oid_sha256);
+                                writer.next().write_null();
+                            });
+
+                            // digestEncryptionAlgorithm: ecdsa-with-sha256
+                            writer.next().write_sequence(|writer| {
+                                writer.next().write_oid(&oid_ecdsa_with_sha256);
+                            });
+
+                            // encryptedDigest: signature bytes
+                            writer.next().write_bytes(sf_der_sig.as_bytes());
+                        });
                     });
                 });
             });

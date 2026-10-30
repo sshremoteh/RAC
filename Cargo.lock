@@ -519,7 +519,7 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "rac-axml"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "byteorder",
  "quick-xml",
@@ -530,7 +530,7 @@ dependencies = [
 
 [[package]]
 name = "rac-cli"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "clap",
@@ -543,7 +543,7 @@ dependencies = [
 
 [[package]]
 name = "rac-dex"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "adler2",
  "byteorder",
@@ -553,7 +553,7 @@ dependencies = [
 
 [[package]]
 name = "rac-signer"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "base64ct",
  "p256",
@@ -570,7 +570,7 @@ dependencies = [
 
 [[package]]
 name = "rac-zip"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "crc32fast",
  "flate2",

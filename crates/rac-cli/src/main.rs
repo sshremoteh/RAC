@@ -12,7 +12,7 @@ use walkdir::WalkDir;
 const MINIMAL_ARM64_SO: &[u8] = include_bytes!("res/libmain.so");
 
 #[derive(Parser)]
-#[command(name = "rac", author = "RAC Team", version = "0.1.0", about = "Rust Android Compiler - Ultra-fast standalone APK compiler and packager")]
+#[command(name = "rac", author = "RAC Team", version, about = "Rust Android Compiler - Ultra-fast standalone APK compiler and packager")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
