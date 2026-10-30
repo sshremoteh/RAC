@@ -74,7 +74,23 @@ flowchart TD
 
 ---
 
-## 🛠️ Установка и сборка из исходников
+## 📦 Быстрая установка
+
+### Linux / macOS (CLI)
+Установка одной командой через терминал (автоматически скачивает бинарник или компилирует через Cargo, добавляет в PATH):
+```bash
+curl -fsSL https://raw.githubusercontent.com/sshremoteh/RAC/main/install.sh | bash
+```
+
+### Windows (PowerShell CLI)
+Установка одной командой в PowerShell:
+```powershell
+irm https://raw.githubusercontent.com/sshremoteh/RAC/main/install.ps1 | iex
+```
+
+---
+
+## 🛠️ Ручная сборка из исходников
 
 Для сборки требуется только установленный компилятор Rust:
 
